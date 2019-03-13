@@ -7,11 +7,6 @@ import os, json, re
 import shutil, tempfile
 
 
-
-empty_root_node = {'alive_time':0,'isdir':True,'mtime':0,'exclude_patterns':[
-    r'_.*'
-]}
-
 cache={
     'roots':{},
     'cur_time':{}
@@ -21,16 +16,41 @@ pats={
     'forin_capture_uislp':r"^\s*--\^\s*forin\s+([.\w /]+)\s*$"
 }
 
-compiled_re={
-    'forin':re.compile(r"\s*--\^\s*forin\s+(.*[^\s])\s*"),
-    'non_space_tokenizer':re.compile(r"[^\s]+")
-}
-
+compiled_re={}
+compiled_output = {}
 
 verbosity={
     'debug':True,
-    'default':True
+    'default':False,
+    "initialize":True
 }
+
+def load_compiled_re(line_comment_syntax,format_suffixes):
+    global compiled_re
+    global compiled_output
+
+    compiled_re['forin'] = re.compile(r"\s*"+line_comment_syntax+r"\^\s*forin\s+(.*[^\s])\s*")
+    compiled_re['printable_format'] = re.compile(r"(\s*)"+line_comment_syntax+r">\s*(.*[^\s])\s*")
+    compiled_re['namodular_syntax'] = re.compile(r"\s*"+line_comment_syntax+r"[><^$].*")
+    compiled_re['block_end'] = re.compile(r"\s*"+line_comment_syntax+r"\$.*")
+    compiled_re['invalidation'] = re.compile(r"\s*"+line_comment_syntax+r"<\s*invalid\scmd\sblock(\s*:.*)?\s*")
+
+    
+    compiled_re['non_space_tokenizer'] = re.compile(r"[^\s]+")
+    pat = ""
+    for suffix in format_suffixes:
+        pat += r"(.*\."
+        pat += suffix
+        pat += r")|"
+    pat = pat[:-1]
+
+    compiled_re['outputable_suffix'] = re.compile(pat)
+    
+
+
+    compiled_output = {}
+    compiled_output['invalidation'] = ""+line_comment_syntax+r"< invalid cmd block \n"
+
 
 def iter_to_list_match_groupx_start_end_s(iter_,*group_ids):
     list_={}
@@ -174,7 +194,7 @@ def open_or_make_json(fp_json,default = {}):
     count = 0
     obj = None
     while count < 3:
-        print("attempting : " + fp_json)
+        print("ex6 197 : attempting to open : " + fp_json)
         count += 1
         try:
             with open(fp_json) as f:
@@ -211,9 +231,9 @@ def uislp_to_full_path(fp_root_xsep,fp_file_xsep,uislp,call_stack=0):
     return os.path.normpath(unnorm_path)
 
 
-lua_suffix = re.compile(r".*\.lua")
-def is_lua_suffixed(name):
-    if lua_suffix.match(name):
+def is_suffixed(name,call_stack):
+    if compiled_re['outputable_suffix'].match(name):
+        print_in(call_stack,"name : " + name + " is suffixed")
         return True 
 
 
@@ -343,7 +363,7 @@ def link_output_blocks(fp_root_xsep,fp_file_xsep,current_node,call_stack):
     mtime = os.path.getmtime(fp_file_xsep)
 
     # print(str(current_node))
-    if is_file(current_node) and is_lua_suffixed(fp_file_xsep):
+    if is_file(current_node) and is_suffixed(fp_file_xsep,call_stack):
         if (mtime != current_node['mtime']):
             print_in(call_stack+1,"parsing uislps :")
             
@@ -372,8 +392,6 @@ def link_output_blocks(fp_root_xsep,fp_file_xsep,current_node,call_stack):
 
 def find_nth_x(str_,target_n,x):
 
-    print(" in :"+str_ + " the " + str(target_n) + "-th "+x+" is at :")
-
     mag_ = abs(target_n)
     dir_ = 1 if target_n > 0 else -1
     idx = -1 if target_n > 0 else len(str_)
@@ -388,7 +406,7 @@ def find_nth_x(str_,target_n,x):
         if str_[idx] == x:
             count += 1
             if count == mag_:
-                print("      "+ str(count))
+                #print("      "+ str(count))
                 return idx
     
 
@@ -551,12 +569,13 @@ def pf_to_tokens(printable_format_xxws,call_stack = 0):
     return tokens
 
 
-def expand_B_tokens(tokens,fp_root_xsep,rb_slp_s,e_i_idx,call_stack):
+def expand_B_tokens(tokens,fp_root_xsep,rb_slp_s,e_i_idx,report_sk_idx,call_stack):
     res_tokens = []
     # not str_
     
+    idx = -1
     for tok in tokens :
-
+        idx += 1
         if 'which_eoi' in tok:
             stok = tok
             
@@ -628,6 +647,12 @@ def expand_B_tokens(tokens,fp_root_xsep,rb_slp_s,e_i_idx,call_stack):
             if '-iv' in stok:
                 slp = ""
 
+            if '-sk' in stok:
+                report_sk_idx['result'] = idx
+
+            if '-exo' in stok:
+                slp = re.sub(r"\w+__","",slp)
+
             res_tokens.append(slp)
 
         else:
@@ -687,16 +712,8 @@ def list_rb_slp_s_r(fp_root_xsep,rb_slp_node,node,list_):
 
 
 def fill_block(fp_root_xsep,rb_slp_input_dir_xxsep,input_node,rb_slp_outfile,tmp_file,indent,pf_xxws,call_stack):
-
-
-
-
     
     print_in(call_stack,"start of fill_block :")
-    o = {"fp_root_xsep":fp_root_xsep,"rb_slp_input_dir_xxsep":rb_slp_input_dir_xxsep,"input_node":input_node,"rb_slp_outfile":rb_slp_outfile,"indent":indent,"pf_xxws":pf_xxws,"call_stack":call_stack}
-    print_in(call_stack + 1,"args :")
-    for k in o:
-        print_in(call_stack+2, ""+k + " : " + str(o[k]))
 
     tokens = pf_to_tokens(pf_xxws)
 
@@ -727,16 +744,27 @@ def fill_block(fp_root_xsep,rb_slp_input_dir_xxsep,input_node,rb_slp_outfile,tmp
 
 
     passed = []
-    
+    report_sk_idx = {}
+
     for rb_slp in list_:
         
         rb_slp_s['e'] = rb_slp
         #def tokens_to_output(tokens,fp_root_xsep,rb_slp_s,e_i_idx,idx,last_idx):
-        output = expand_B_tokens(tokens,fp_root_xsep,rb_slp_s,e_i_idx,call_stack)
+        output = expand_B_tokens(tokens,fp_root_xsep,rb_slp_s,e_i_idx,report_sk_idx,call_stack)
         passed.append(output) if output else None
     
     idx = -1
     last_idx = len(passed) - 1
+
+    
+    if 'result' in report_sk_idx : 
+        idx = report_sk_idx['result']
+        def sk(elm):
+            return elm[idx]
+        passed.sort(key=sk)
+        print(passed)
+
+
     for tokens in passed:
         idx += 1
         tokens = expand_A_tokens(tokens,idx,last_idx)
@@ -763,7 +791,7 @@ def write_to_file(fp_root_xsep,fp_input_dir_xsep,rb_slp_input_dir_xxsep,input_no
                 print_in(call_stack+0,"expecting : "+str(expect))
 
                 if expect == "printable_format":
-                    reres_printable_format = re.match(r"(\s*)-->\s*(.*[^\s])\s*",line)
+                    reres_printable_format = compiled_re['printable_format'].match(line)
                     if reres_printable_format :
                         print_in(call_stack+1,"got a printable_format")
                         indent = reres_printable_format.group(1)
@@ -776,10 +804,11 @@ def write_to_file(fp_root_xsep,fp_input_dir_xsep,rb_slp_input_dir_xxsep,input_no
                         expect = "invalidation"
                 
                 elif expect == "end_or_nots":
-                    reres_namodular_syntax = re.match(r"\s*--[><^$].*",line)
+                    reres_namodular_syntax = compiled_re['namodular_syntax'].match(line)
                     if reres_namodular_syntax:
                         print_in(call_stack+1,"got a reres_namodular_syntax")
-                        reres_block_end = re.match(r"\s*--\$.*",line)
+                 
+                        reres_block_end = compiled_re['block_end'].match(line)
                         if reres_block_end :
                             print_in(call_stack+2,"got a reres_block_end")
                             # def fill_block(fp_root_xsep,rb_slp_input_dir_xxsep,input_node,rb_slp_outfile,tmp_file,indent,pf_xxws,call_stack):
@@ -798,13 +827,13 @@ def write_to_file(fp_root_xsep,fp_input_dir_xsep,rb_slp_input_dir_xxsep,input_no
                     to_check.append(line_buffer[0]) if line_buffer else False 
                     reres_invalidation = None
                     for line1 in to_check:
-                        reres_invalidation = re.match(r"\s*--<\s*invalid\scmd\sblock(\s*:.*)?\s*",line1)
+                        reres_invalidation = compiled_re['invalidation'].match(line1)
                         if reres_invalidation:
                             break
 
                     if not reres_invalidation:
                         print_in(call_stack+1,"invalidation is not marked, marking .. ")
-                        tmp_file.write("--< invalid cmd block \n")
+                        tmp_file.write(compiled_output['invalidation'])
                     for line1 in line_buffer:
                         print_in(call_stack+1,"releasing line : " + line1[:-1])
                         tmp_file.write(line1)
@@ -824,8 +853,8 @@ def write_to_file(fp_root_xsep,fp_input_dir_xsep,rb_slp_input_dir_xxsep,input_no
 
             if line_buffer:
 
-                if not re.match(r"\s*--<\s*invalid\scmd\sblock(\s*:.*)?\s*",line_buffer[0]):
-                    tmp_file.write("--< invalid cmd block \n")
+                if not compiled_re['invalidation'].match(line_buffer[0]):
+                    tmp_file.write(compiled_output['invalidation'])
 
                 for line in line_buffer:
                     tmp_file.write(line)
@@ -839,7 +868,7 @@ def write_to_file(fp_root_xsep,fp_input_dir_xsep,rb_slp_input_dir_xxsep,input_no
 
 def out_put_r(fp_root_xsep,fp_input_dir_xsep,rb_slp_input_dir_xxsep,node,call_stack):
 
-    print_in(call_stack,"out_put_r : "+fp_root_xsep)
+    print_in(call_stack,"out_put_r : "+fp_input_dir_xsep)
 
     if ( 'output_files' in node ):
         
@@ -898,22 +927,55 @@ class ex6Command(sublime_plugin.TextCommand):
             reset(fp_root_xsep)
             return  
         
+
+        fp_config_json = fp_root_xsep+os.sep+"_namodular"+os.sep+"config.json"
+        config = open_or_make_json(fp_config_json)
+
+        if 'line_comment_syntax' not in config :
+            config['line_comment_syntax'] = "--" 
+
+        if 'outputable_suffix' not in config :
+            config['outputable_suffix'] = ["lua"] 
+
+        if 'initial_root_exclude_patterns' not in config:
+            print_in(0," dcode - g930gh28 ","initialize")
+            config['initial_root_exclude_patterns'] = []
+
+        load_compiled_re(config['line_comment_syntax'],config['outputable_suffix'])
+
+
         fp_tree_json = fp_root_xsep_to_fp_tree_json(fp_root_xsep)
         if fp_root_xsep not in cache['roots'] or not cache['roots'][fp_root_xsep]:  
+
+            config['initial_root_exclude_patterns'] += [r'_.*',r'\..*']
+            print_in(0,str(config['initial_root_exclude_patterns']),"initialize")
+
+            empty_root_node = {'alive_time':0,'isdir':True,'mtime':0,'exclude_patterns':config['initial_root_exclude_patterns']}
+
             cache['roots'][fp_root_xsep] = open_or_make_json(fp_tree_json,empty_root_node)
             if not cache['roots'][fp_root_xsep]:
                 print("cannot load or make tree.json")
-                return 
+                return
+
+        fp_config_json = fp_root_xsep+os.sep+"_namodular"+os.sep+"config.json"
+        config = open_or_make_json(fp_config_json)
+
+        if 'line_comment_syntax' not in config :
+            config['line_comment_syntax'] = "--" 
 
         root = cache['roots'][fp_root_xsep]
 
 
         cache['cur_time'][fp_root_xsep] = root['alive_time']+1
 
+        print("dcode - fgg93")
+
         update_file_tree(fp_root_xsep,fp_root_xsep,None,root,0)
+        print("dcode - fgg95")
 
         link_output_blocks(fp_root_xsep,fp_root_xsep,root,0)
 
+        print("dcode - fgg97")
         # (fp_root_xsep,fp_input_dir_xsep,rbp_input_dir_xxsep,input_node,call_stack):
         out_put_r(fp_root_xsep,fp_root_xsep,"", root,0)
 
